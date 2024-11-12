@@ -1,34 +1,55 @@
 package com.challenge.converter.service.business;
 
+import com.challenge.converter.config.ExchangeRateProperties;
+import com.challenge.converter.model.ConversionResponse;
+import com.challenge.converter.utils.Constants;
+import jakarta.annotation.PostConstruct;
 import java.util.HashMap;
 import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @Service
-public class CurrencyConverterServiceImpl implements CurrencyConverterService{
-  private static final Map<String, Double> exchangeRates = new HashMap<>();
+@Slf4j
+public class CurrencyConverterServiceImpl implements CurrencyConverterService {
+  private final Map<String, Double> exchangeRates = new HashMap<>();
 
-  static {
-    exchangeRates.put("USD_PEN", 3.77);
-    exchangeRates.put("PEN_USD", 0.27);
+  @Autowired
+  private ExchangeRateProperties exchangeRateProperties;
+
+  @PostConstruct
+  public void loadExchangeRates() {
+    Flux.fromIterable(exchangeRateProperties.getExchangeRates())
+        .doOnNext(rate -> exchangeRates.put(rate.getPair(), rate.getRate()))
+        .subscribe();
   }
 
-  public Mono<Double> convert(String fromCurrency, String toCurrency, double amount) {
-    String key = fromCurrency + "_" + toCurrency;
-    if (exchangeRates.containsKey(key)) {
-      return Mono.just(amount * exchangeRates.get(key));
-    } else {
-      return Mono.error(new IllegalArgumentException("Rate not available for " + key));
-    }
+  public Mono<ConversionResponse> convert(String fromCurrency, String toCurrency, double amount) {
+    String key = fromCurrency + Constants.GUION + toCurrency;
+
+    return Mono.justOrEmpty(exchangeRates.get(key))
+        .map(rate -> {
+          double convertedAmount = amount * rate;
+          return ConversionResponse.builder()
+              .fromCurrency(fromCurrency)
+              .toCurrency(toCurrency)
+              .amount(amount)
+              .convertedAmount(convertedAmount)
+              .exchangeRate(rate)
+              .responseMessage(Constants.RESPONSE_MESSAGE_SUCCESS)
+              .build();
+        })
+        .switchIfEmpty(Mono.error(new IllegalArgumentException(Constants.ILEGAL_ARGUMENT + key)))
+        .doOnError(error -> log.error( Constants.MESSAGE_ERROR + error.getMessage()));
   }
 
   public Mono<Double> getExchangeRate(String fromCurrency, String toCurrency) {
-    String key = fromCurrency + "_" + toCurrency;
-    if (exchangeRates.containsKey(key)) {
-      return Mono.just(exchangeRates.get(key));
-    } else {
-      return Mono.error(new IllegalArgumentException("Rate not available for " + key));
-    }
+    String key = fromCurrency + Constants.GUION + toCurrency;
+
+    return Mono.justOrEmpty(exchangeRates.get(key))
+        .switchIfEmpty(Mono.error(new IllegalArgumentException(Constants.ILEGAL_ARGUMENT + key)));
   }
 }
